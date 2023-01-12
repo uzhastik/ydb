@@ -29,5 +29,5 @@ jobs:
       run: |
         rm -rf /mnt/d/tmp/*
         cd ../build/ydb
-        TMPDIR=/mnt/d/tmp ctest -j28 --timeout 1200 --force-new-ctest-process --output-on-failure | grep -E "(Test\s*#|\[FAIL\])"
+        TMPDIR=/mnt/d/tmp ctest -j28 --timeout 1200 --force-new-ctest-process --output-on-failure | grep -E "(Test\s*#|grep "mFAIL"$'\33')" --color=never
       
