@@ -10,7 +10,6 @@
 add_executable(library-cpp-actors-dnsresolver-ut)
 target_include_directories(library-cpp-actors-dnsresolver-ut PRIVATE
   ${CMAKE_SOURCE_DIR}/library/cpp/actors/dnsresolver
-  ${CMAKE_SOURCE_DIR}/contrib/libs/c-ares/include
 )
 target_link_libraries(library-cpp-actors-dnsresolver-ut PUBLIC
   contrib-libs-cxxsupp
