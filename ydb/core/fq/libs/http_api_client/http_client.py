@@ -209,7 +209,7 @@ class YQHttpClient(object):
         query = self.get_query(query_id)
         if status != "COMPLETED":
             issues = query["issues"]
-            raise RuntimeError(f"Query {query_id} failed", issues=issues)
+            raise RuntimeError(f"Query {query_id} failed with issues={issues}")
 
         return len(query["result_sets"])
 
