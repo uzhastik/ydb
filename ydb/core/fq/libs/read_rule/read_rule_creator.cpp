@@ -4,7 +4,7 @@
 #include <ydb/core/fq/libs/events/events.h>
 
 #include <ydb/library/services/services.pb.h>
-#include <ydb/public/sdk/cpp/client/ydb_persqueue_public/persqueue.h>
+#include <ydb/public/sdk/cpp/client/ydb_topic/topic.h>
 
 #include <ydb/library/yql/providers/dq/api/protos/service.pb.h>
 #include <ydb/library/yql/providers/pq/proto/dq_task_params.pb.h>
@@ -107,16 +107,16 @@ public:
         LOG_D("Make request for read rule creation for topic `" << TopicConsumer.topic_path() << "` [" << Index << "]");
         PqClient.AddReadRule(
             GetTopicPath(),
-            NYdb::NPersQueue::TAddReadRuleSettings()
+            NYdb::NTopic::TAddReadRuleSettings()
                 .ReadRule(
-                    NYdb::NPersQueue::TReadRuleSettings()
+                    NYdb::NTopic::TReadRuleSettings()
                         .ConsumerName(TopicConsumer.consumer_name())
                         .ServiceType("yandex-query")
                         .SupportedCodecs({
-                            NYdb::NPersQueue::ECodec::RAW,
-                            NYdb::NPersQueue::ECodec::GZIP,
-                            NYdb::NPersQueue::ECodec::LZOP,
-                            NYdb::NPersQueue::ECodec::ZSTD
+                            NYdb::NTopic::ECodec::RAW,
+                            NYdb::NTopic::ECodec::GZIP,
+                            NYdb::NTopic::ECodec::LZOP,
+                            NYdb::NTopic::ECodec::ZSTD
                         })
                 )
         ).Subscribe(
@@ -135,7 +135,7 @@ public:
             PassAway();
         } else {
             if (!RetryState) {
-                RetryState = NYdb::NPersQueue::IRetryPolicy::GetExponentialBackoffPolicy()->CreateRetryState();
+                RetryState = NYdb::NTopic::IRetryPolicy::GetExponentialBackoffPolicy()->CreateRetryState();
             }
             TMaybe<TDuration> nextRetryDelay = RetryState->GetNextRetryDelay(status.GetStatus());
             if (status.GetStatus() == NYdb::EStatus::SCHEME_ERROR) {
@@ -182,9 +182,8 @@ public:
     )
 
 private:
-    NYdb::NPersQueue::TPersQueueClientSettings GetPqClientSettings(std::shared_ptr<NYdb::ICredentialsProviderFactory> credentialsProvider) {
-        return NYdb::NPersQueue::TPersQueueClientSettings()
-            .ClusterDiscoveryMode(NYdb::NPersQueue::EClusterDiscoveryMode::Off)
+    NYdb::NTopic::TTopicClientSettings GetPqClientSettings(std::shared_ptr<NYdb::ICredentialsProviderFactory> credentialsProvider) {
+        return NYdb::NTopic::TTopicClientSettings()
             .Database(TopicConsumer.database())
             .DiscoveryEndpoint(TopicConsumer.cluster_endpoint())
             .CredentialsProviderFactory(std::move(credentialsProvider))
@@ -197,9 +196,9 @@ private:
     const TString QueryId;
     const Fq::Private::TopicConsumer TopicConsumer;
     NYdb::TDriver YdbDriver;
-    NYdb::NPersQueue::TPersQueueClient PqClient;
+    NYdb::NTopic::TTopicClient PqClient;
     ui64 Index = 0;
-    NYdb::NPersQueue::IRetryPolicy::IRetryState::TPtr RetryState;
+    NYdb::NTopic::IRetryPolicy::IRetryState::TPtr RetryState;
     bool RequestInFlight = false;
     bool Finishing = false;
 };

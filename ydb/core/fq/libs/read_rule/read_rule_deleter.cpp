@@ -4,7 +4,7 @@
 #include <ydb/core/fq/libs/events/events.h>
 
 #include <ydb/library/services/services.pb.h>
-#include <ydb/public/sdk/cpp/client/ydb_persqueue_public/persqueue.h>
+#include <ydb/public/sdk/cpp/client/ydb_topic/topic.h>
 
 #include <ydb/library/actors/core/actor_bootstrapped.h>
 #include <ydb/library/actors/core/hfunc.h>
@@ -103,7 +103,7 @@ public:
         LOG_D("Make request for read rule deletion for topic `" << Topic.topic_path() << "` [" << Index << "]");
         PqClient.RemoveReadRule(
             GetTopicPath(),
-            NYdb::NPersQueue::TRemoveReadRuleSettings()
+            NYdb::NTopic::TRemoveReadRuleSettings()
                 .ConsumerName(Topic.consumer_name())
         ).Subscribe(
             [actorSystem = TActivationContext::ActorSystem(), selfId = SelfId()](const NYdb::TAsyncStatus& status) {
@@ -121,7 +121,7 @@ public:
             if (!RetryState) {
                 // Choose default retry policy arguments from persqueue.h except maxRetries
                 RetryState =
-                    NYdb::NPersQueue::IRetryPolicy::GetExponentialBackoffPolicy(
+                    NYdb::NTopic::IRetryPolicy::GetExponentialBackoffPolicy(
                         TDuration::MilliSeconds(10), // minDelay
                         TDuration::MilliSeconds(200), // minLongRetryDelay
                         TDuration::Seconds(30), // maxDelay
@@ -156,9 +156,8 @@ public:
     )
 
 private:
-    NYdb::NPersQueue::TPersQueueClientSettings GetPqClientSettings(std::shared_ptr<NYdb::ICredentialsProviderFactory> credentialsProvider) {
-        return NYdb::NPersQueue::TPersQueueClientSettings()
-            .ClusterDiscoveryMode(NYdb::NPersQueue::EClusterDiscoveryMode::Off)
+    NYdb::NTopic::TTopicClientSettings GetPqClientSettings(std::shared_ptr<NYdb::ICredentialsProviderFactory> credentialsProvider) {
+        return NYdb::NTopic::TTopicClientSettings()
             .Database(Topic.database())
             .DiscoveryEndpoint(Topic.cluster_endpoint())
             .CredentialsProviderFactory(std::move(credentialsProvider))
@@ -171,10 +170,10 @@ private:
     const TString QueryId;
     const Fq::Private::TopicConsumer Topic;
     NYdb::TDriver YdbDriver;
-    NYdb::NPersQueue::TPersQueueClient PqClient;
+    NYdb::NTopic::TTopicClient PqClient;
     ui64 Index = 0;
     const size_t MaxRetries;
-    NYdb::NPersQueue::IRetryPolicy::IRetryState::TPtr RetryState;
+    NYdb::NTopic::IRetryPolicy::IRetryState::TPtr RetryState;
 };
 
 // Actor for deletion of read rules for all topics in the query.
