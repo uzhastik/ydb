@@ -270,6 +270,7 @@ NDq::IDqAsyncIoFactory::TPtr CreateAsyncIoFactory(
     RegisterDqInputTransformLookupActorFactory(*factory);
     RegisterDqPqReadActorFactory(*factory, driver, nullptr);
     RegisterYdbReadActorFactory(*factory, driver, nullptr);
+    RegisterDQSolomonReadActorFactory(*factory, nullptr);
     RegisterClickHouseReadActorFactory(*factory, nullptr, httpGateway);
     RegisterGenericProviderFactories(*factory, credentialsFactory, genericClient);
     RegisterDqPqWriteActorFactory(*factory, driver, nullptr);
