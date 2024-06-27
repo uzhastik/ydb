@@ -1145,6 +1145,11 @@ void TDataShard::EnqueueChangeRecords(TVector<IDataShardChangeCollector::TChange
         ChangeQueueReservedCapacity -= it->second;
         ChangeQueueReservedCapacity += records.size();
     }
+ 
+    if (auto it = ChangeQueueReservations.find(cookie); it != ChangeQueueReservations.end()) {
+        ChangeQueueReservedCapacity -= it->second;
+        ChangeQueueReservedCapacity += records.size();
+    }
 
     UpdateChangeExchangeLag(now);
     IncCounter(COUNTER_CHANGE_RECORDS_ENQUEUED, forward.size());
