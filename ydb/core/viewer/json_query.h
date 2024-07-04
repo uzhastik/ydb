@@ -170,6 +170,22 @@ public:
         }
     }
 
+    void SetTransactionMode(NKikimrKqp::TQueryRequest& request) {
+        if (TransactionMode == "serializable-read-write") {
+            request.mutable_txcontrol()->mutable_begin_tx()->mutable_serializable_read_write();
+            request.mutable_txcontrol()->set_commit_tx(true);
+        } else if (TransactionMode == "online-read-only") {
+            request.mutable_txcontrol()->mutable_begin_tx()->mutable_online_read_only();
+            request.mutable_txcontrol()->set_commit_tx(true);
+        } else if (TransactionMode == "stale-read-only") {
+            request.mutable_txcontrol()->mutable_begin_tx()->mutable_stale_read_only();
+            request.mutable_txcontrol()->set_commit_tx(true);
+        } else if (TransactionMode == "snapshot-read-only") {
+            request.mutable_txcontrol()->mutable_begin_tx()->mutable_snapshot_read_only();
+            request.mutable_txcontrol()->set_commit_tx(true);
+        }
+    }
+
     void SendKpqProxyRequest() {
         if (QueryId) {
             TActorId actorId = Viewer->FindRunningQuery(QueryId);
