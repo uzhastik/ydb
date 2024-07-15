@@ -111,12 +111,14 @@ void RunArgumentQueries(const TExecutionOptions& executionOptions, NKqpRun::TKqp
             if (!runner.ExecuteQuery(executionOptions.ScriptQueries[id], executionOptions.ScriptQueryAction, executionOptions.TraceId)) {
                 ythrow yexception() << TInstant::Now().ToIsoStringLocal() << " Query execution failed";
             }
+            Cout << colors.Cyan() << "Generic request finished. Time: " << TInstant::Now() - startTime << colors.Default() << Endl;
             break;
 
         case TExecutionOptions::EExecutionCase::YqlScript:
             if (!runner.ExecuteYqlScript(executionOptions.ScriptQueries[id], executionOptions.ScriptQueryAction, executionOptions.TraceId)) {
                 ythrow yexception() << TInstant::Now().ToIsoStringLocal() << " Yql script execution failed";
             }
+            Cout << colors.Cyan() << "Yql script request finished. Time: " << TInstant::Now() - startTime << colors.Default() << Endl;
             break;
 
         case TExecutionOptions::EExecutionCase::AsyncQuery:
