@@ -85,6 +85,30 @@ struct TEvPrivate {
 } // namespace
 
 class TDqPqReadActor : public NActors::TActor<TDqPqReadActor>, public IDqComputeActorAsyncInput {
+    struct TMetrics {
+        TMetrics(const TTxId& txId, ui64 taskId, const ::NMonitoring::TDynamicCounterPtr& counters)
+            : TxId(std::visit([](auto arg) { return ToString(arg); }, txId))
+            , Counters(counters) {
+            SubGroup = Counters->GetSubgroup("sink", "PqRead");
+            auto sink = SubGroup->GetSubgroup("tx_id", TxId);
+            auto task = sink->GetSubgroup("task_id", ToString(taskId));
+            InFlyAsyncInputData = task->GetCounter("InFlyAsyncInputData");
+            InFlySubscribe = task->GetCounter("InFlySubscribe");
+            AsyncInputDataRate = task->GetCounter("AsyncInputDataRate", true);
+        }
+
+        ~TMetrics() {
+            SubGroup->RemoveSubgroup("id", TxId);
+        }
+
+        TString TxId;
+        ::NMonitoring::TDynamicCounterPtr Counters;
+        ::NMonitoring::TDynamicCounterPtr SubGroup;
+        ::NMonitoring::TDynamicCounters::TCounterPtr InFlyAsyncInputData;
+        ::NMonitoring::TDynamicCounters::TCounterPtr InFlySubscribe;
+        ::NMonitoring::TDynamicCounters::TCounterPtr AsyncInputDataRate;
+    };
+
 public:
     using TPartitionKey = std::pair<TString, ui64>; // Cluster, partition id.
     using TDebugOffsets = TMaybe<std::pair<ui64, ui64>>;
@@ -104,6 +128,7 @@ public:
         : TActor<TDqPqReadActor>(&TDqPqReadActor::StateFunc)
         , InputIndex(inputIndex)
         , TxId(txId)
+        , Metrics(txId, taskId, counters)
         , BufferSize(bufferSize)
         , HolderFactory(holderFactory)
         , LogPrefix(TStringBuilder() << "SelfId: " << this->SelfId() << ", TxId: " << TxId << ", task: " << taskId << ". PQ source. ")
@@ -248,6 +273,11 @@ private:
     void Handle(TEvPrivate::TEvSourceDataReady::TPtr&) {
         SRC_LOG_T("SessionId: " << GetSessionId() << " Source data ready");
         SubscribedOnEvent = false;
+        if (ev.Get()->Cookie) {
+            Metrics.InFlySubscribe->Dec();
+        }
+        Metrics.InFlyAsyncInputData->Set(1);
+        Metrics.AsyncInputDataRate->Inc();
         Send(ComputeActorId, new TEvNewAsyncInputDataArrived(InputIndex));
     }
 
@@ -387,9 +417,10 @@ private:
     void SubscribeOnNextEvent() {
         if (!SubscribedOnEvent) {
             SubscribedOnEvent = true;
+            Metrics.InFlySubscribe->Inc();
             NActors::TActorSystem* actorSystem = NActors::TActivationContext::ActorSystem();
             EventFuture = GetReadSession().WaitEvent().Subscribe([actorSystem, selfId = SelfId()](const auto&){
-                actorSystem->Send(selfId, new TEvPrivate::TEvSourceDataReady());
+                actorSystem->Send(selfId, new TEvPrivate::TEvSourceDataReady(), 0, 1);
             });
         }
     }
@@ -595,6 +626,7 @@ private:
     const ui64 InputIndex;
     TDqAsyncStats IngressStats;
     const TTxId TxId;
+    TMetrics Metrics;
     const i64 BufferSize;
     const THolderFactory& HolderFactory;
     const TString LogPrefix;

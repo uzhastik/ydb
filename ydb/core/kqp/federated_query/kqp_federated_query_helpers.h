@@ -65,6 +65,7 @@ namespace NKikimr::NKqp {
         NYql::NConnector::IClient::TPtr ConnectorClient;
         std::optional<NActors::TActorId> DatabaseResolverActorId;
         NYql::IMdbEndpointGenerator::TPtr MdbEndpointGenerator;
+        NYql::NDq::TS3ReadActorFactoryConfig S3ReadActorFactoryConfig;
     };
 
     struct TKqpFederatedQuerySetupFactoryMock: public IKqpFederatedQuerySetupFactory {
