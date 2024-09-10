@@ -35,7 +35,7 @@ Y_UNIT_TEST_SUITE(KqpFederatedQuery) {
         const TString externalDataSourceName = "/Root/external_data_source";
         const TString externalTableName = "/Root/test_binding_resolve";
         const TString bucket = "test_bucket1";
-        const TString object = TStringBuilder() << "test_" << GetSymbolsString(' ', '~', "{}") << "_object";
+        const TString object = TStringBuilder() << "test_" << GetSymbolsString(' ', '~', "*?{}") << "_object";
 
         CreateBucketWithObject(bucket, object, TEST_CONTENT);
 
