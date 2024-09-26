@@ -151,7 +151,7 @@ Y_UNIT_TEST_SUITE(KqpOlapClickbench) {
                 WHERE AdvEngineID != 0
                 GROUP BY AdvEngineID
                 ORDER BY c DESC
-            )");
+            )")
             //.SetExpectedReply("[[[\"40999\"];[4];1u];[[\"40998\"];[3];1u];[[\"40997\"];[2];1u]]")
             // Should be fixed in https://st.yandex-team.ru/KIKIMR-17009
             // .SetExpectedReadNodeType("TableFullScan");
@@ -181,7 +181,7 @@ Y_UNIT_TEST_SUITE(KqpOlapClickbench) {
                 GROUP BY SearchPhrase
                 ORDER BY c DESC
                 LIMIT 10;
-            )");
+            )")
             //.SetExpectedReply("[[[\"40999\"];[4];1u];[[\"40998\"];[3];1u];[[\"40997\"];[2];1u]]")
             // Should be fixed in https://st.yandex-team.ru/KIKIMR-17009
             // .SetExpectedReadNodeType("TableFullScan");
@@ -197,7 +197,7 @@ Y_UNIT_TEST_SUITE(KqpOlapClickbench) {
                 GROUP BY SearchEngineID, SearchPhrase
                 ORDER BY c DESC
                 LIMIT 10;
-            )");
+            )")
             //.SetExpectedReply("[[[\"40999\"];[4];1u];[[\"40998\"];[3];1u];[[\"40997\"];[2];1u]]")
             // Should be fixed in https://st.yandex-team.ru/KIKIMR-17009
             // .SetExpectedReadNodeType("TableFullScan");

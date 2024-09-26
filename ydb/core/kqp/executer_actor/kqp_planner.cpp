@@ -53,10 +53,6 @@ void BuildInitialTaskResources(const TKqpTasksGraph& graph, ui64 taskId, TTaskRe
     ret.HeavyProgram = opts.GetHasMapJoin();
 }
 
-bool LimitCPU(TIntrusivePtr<TUserRequestContext> ctx) {
-    return ctx->PoolId && ctx->PoolConfig.has_value() && ctx->PoolConfig->TotalCpuLimitPercentPerNode > 0;
-}
-
 }
 
 bool TKqpPlanner::UseMockEmptyPlanner = false;
@@ -104,10 +100,6 @@ TKqpPlanner::TKqpPlanner(TKqpPlanner::TArgs&& args)
             Database = TStringBuilder() << '/' << domain->Name;
             LOG_E("Database not set, use " << Database);
         }
-    }
-
-    if (LimitCPU(UserRequestContext)) {
-        AllowSinglePartitionOpt = false;
     }
 }
 
@@ -185,7 +177,9 @@ std::unique_ptr<TEvKqpNode::TEvStartKqpTasksRequest> TKqpPlanner::SerializeReque
     auto result = std::make_unique<TEvKqpNode::TEvStartKqpTasksRequest>(TasksGraph.GetMeta().GetArenaIntrusivePtr());
     auto& request = result->Record;
     request.SetTxId(TxId);
-    request.SetLockTxId(LockTxId);
+    if (LockTxId) {
+        request.SetLockTxId(*LockTxId);
+    }
     request.SetLockNodeId(LockNodeId);
     ActorIdToProto(ExecuterId, request.MutableExecuterActorId());
 
@@ -204,7 +198,6 @@ std::unique_ptr<TEvKqpNode::TEvStartKqpTasksRequest> TKqpPlanner::SerializeReque
     request.SetStartAllOrFail(true);
     if (UseDataQueryPool) {
         request.MutableRuntimeSettings()->SetExecType(NYql::NDqProto::TComputeRuntimeSettings::DATA);
-        request.MutableRuntimeSettings()->SetUseSpilling(WithSpilling);
     } else {
         request.MutableRuntimeSettings()->SetExecType(NYql::NDqProto::TComputeRuntimeSettings::SCAN);
         request.MutableRuntimeSettings()->SetUseSpilling(WithSpilling);
@@ -230,13 +223,6 @@ std::unique_ptr<TEvKqpNode::TEvStartKqpTasksRequest> TKqpPlanner::SerializeReque
 
     if (SerializedGUCSettings) {
         request.SetSerializedGUCSettings(SerializedGUCSettings);
-    }
-
-    request.SetSchedulerGroup(UserRequestContext->PoolId);
-    request.SetDatabase(Database);
-    if (UserRequestContext->PoolConfig.has_value()) {
-        request.SetMemoryPoolPercent(UserRequestContext->PoolConfig->QueryMemoryLimitPercentPerNode);
-        request.SetMaxCpuShare(UserRequestContext->PoolConfig->TotalCpuLimitPercentPerNode / 100.0);
     }
 
     return result;
@@ -433,14 +419,8 @@ TString TKqpPlanner::ExecuteDataComputeTask(ui64 taskId, ui32 computeTasksSize) 
     NYql::NDqProto::TDqTask* taskDesc = ArenaSerializeTaskToProto(TasksGraph, task, true);
     NYql::NDq::TComputeRuntimeSettings settings;
     if (!TxInfo) {
-        double memoryPoolPercent = 100;
-        if (UserRequestContext->PoolConfig.has_value()) {
-            memoryPoolPercent = UserRequestContext->PoolConfig->QueryMemoryLimitPercentPerNode;
-        }
-
         TxInfo = MakeIntrusive<NRm::TTxState>(
-            TxId, TInstant::Now(), ResourceManager_->GetCounters(),
-            UserRequestContext->PoolId, memoryPoolPercent, Database);
+            TxId, TInstant::Now(), ResourceManager_->GetCounters());
     }
 
     auto startResult = CaFactory_->CreateKqpComputeActor({
@@ -461,7 +441,7 @@ TString TKqpPlanner::ExecuteDataComputeTask(ui64 taskId, ui32 computeTasksSize) 
         .StatsMode = GetDqStatsMode(StatsMode),
         .Deadline = Deadline,
         .ShareMailbox = (computeTasksSize <= 1),
-        .RlPath = Nothing(),
+        .RlPath = Nothing()
     });
 
     if (const auto* rmResult = std::get_if<NRm::TKqpRMAllocateResult>(&startResult)) {
@@ -470,7 +450,12 @@ TString TKqpPlanner::ExecuteDataComputeTask(ui64 taskId, ui32 computeTasksSize) 
 
     TActorId* actorId = std::get_if<TActorId>(&startResult);
     Y_ABORT_UNLESS(actorId);
-    AcknowledgeCA(taskId, *actorId, nullptr);
+    task.ComputeActorId = *actorId;
+
+    LOG_D("Executing task: " << taskId << " on compute actor: " << task.ComputeActorId);
+
+    auto result = PendingComputeActors.emplace(task.ComputeActorId, TProgressStat());
+    YQL_ENSURE(result.second);
     return TString();
 }
 
@@ -555,6 +540,8 @@ std::unique_ptr<IEventHandle> TKqpPlanner::PlanExecution() {
                     if (!result.empty()) {
                         return MakeActorStartFailureError(ExecuterId, result);
                     }
+
+                    PendingComputeTasks.erase(taskId);
                 }
             }
         }
@@ -596,93 +583,11 @@ void TKqpPlanner::Unsubscribe() {
     }
 }
 
-bool TKqpPlanner::AcknowledgeCA(ui64 taskId, TActorId computeActor, const NYql::NDqProto::TEvComputeActorState* state) {
-    auto& task = TasksGraph.GetTask(taskId);
-    if (!task.ComputeActorId) {
-        task.ComputeActorId = computeActor;
-        PendingComputeTasks.erase(taskId);
-        auto [it, success] = PendingComputeActors.try_emplace(computeActor);
-        YQL_ENSURE(success);
-        if (state && state->HasStats()) {
-            it->second.Set(state->GetStats());
-        }
-
-        return true;
-    }
-
-    YQL_ENSURE(task.ComputeActorId == computeActor);
-    auto it = PendingComputeActors.find(computeActor);
-    if (!task.Meta.Completed) {
-        YQL_ENSURE(it != PendingComputeActors.end());
-    }
-
-    if (it != PendingComputeActors.end() && state && state->HasStats()) {
-        it->second.Set(state->GetStats());
-    }
-
-    return false;
-}
-
-bool TKqpPlanner::CompletedCA(ui64 taskId, TActorId computeActor) {
-    auto& task = TasksGraph.GetTask(taskId);
-    if (task.Meta.Completed) {
-        YQL_ENSURE(!PendingComputeActors.contains(computeActor));
-        return false;
-    }
-
-    task.Meta.Completed = true;
-    auto it = PendingComputeActors.find(computeActor);
-    YQL_ENSURE(it != PendingComputeActors.end());
-    LastStats.emplace_back(std::move(it->second));
-    PendingComputeActors.erase(it);
-
-    LOG_I("Compute actor has finished execution: " << computeActor.ToString());
-
-    return true;
-}
-
-void TKqpPlanner::TaskNotStarted(ui64 taskId) {
-    // NOTE: should be invoked only while shutting down - when node is disconnected.
-
-    auto& task = TasksGraph.GetTask(taskId);
-
-    YQL_ENSURE(!task.ComputeActorId);
-    YQL_ENSURE(!task.Meta.Completed);
-
-    PendingComputeTasks.erase(taskId);
-}
-
-TProgressStat::TEntry TKqpPlanner::CalculateConsumptionUpdate() {
-    TProgressStat::TEntry consumption;
-
-    for (const auto& p : PendingComputeActors) {
-        const auto& t = p.second.GetLastUsage();
-        consumption += t;
-    }
-
-    for (const auto& p : LastStats) {
-        const auto& t = p.GetLastUsage();
-        consumption += t;
-    }
-
-    return consumption;
-}
-
-void TKqpPlanner::ShiftConsumption() {
-    for (auto& p : PendingComputeActors) {
-        p.second.Update();
-    }
-
-    for (auto& p : LastStats) {
-        p.Update();
-    }
-}
-
-const THashMap<TActorId, TProgressStat>& TKqpPlanner::GetPendingComputeActors() {
+THashMap<TActorId, TProgressStat>& TKqpPlanner::GetPendingComputeActors() {
     return PendingComputeActors;
 }
 
-const THashSet<ui64>& TKqpPlanner::GetPendingComputeTasks() {
+THashSet<ui64>& TKqpPlanner::GetPendingComputeTasks() {
     return PendingComputeTasks;
 }
 

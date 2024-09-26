@@ -2,15 +2,15 @@
 #include "kqp_scan_events.h"
 
 #include <ydb/core/kqp/runtime/kqp_scan_data.h>
-#include <ydb/core/kqp/runtime/kqp_compute_scheduler.h>
+#include <ydb/library/yql/dq/actors/compute/dq_sync_compute_actor_base.h>
 #include <ydb/library/yql/dq/actors/compute/dq_compute_actor_async_io.h>
 #include <ydb/library/yql/dq/actors/compute/dq_compute_actor.h>
 
 namespace NKikimr::NKqp::NScanPrivate {
 
-class TKqpScanComputeActor: public TSchedulableComputeActorBase<TKqpScanComputeActor> {
+class TKqpScanComputeActor: public NYql::NDq::TDqSyncComputeActorBase<TKqpScanComputeActor> {
 private:
-    using TBase = TSchedulableComputeActorBase<TKqpScanComputeActor>;
+    using TBase = NYql::NDq::TDqSyncComputeActorBase<TKqpScanComputeActor>;
 
     NMiniKQL::TKqpScanComputeContext ComputeCtx;
     NKikimrTxDataShard::TKqpTransaction::TScanTaskMeta Meta;
@@ -23,7 +23,7 @@ private:
     using TBase::ContinueExecute;
     std::set<NActors::TActorId> Fetchers;
     NMiniKQL::TKqpScanComputeContext::TScanData* ScanData = nullptr;
-    const ui64 LockTxId;
+    const TMaybe<ui64> LockTxId;
     const ui32 LockNodeId;
 
     struct TLockHash {
@@ -65,7 +65,7 @@ public:
         return NKikimrServices::TActivity::KQP_SCAN_COMPUTE_ACTOR;
     }
 
-    TKqpScanComputeActor(TComputeActorSchedulingOptions, const TActorId& executerId, ui64 txId, ui64 lockTxId, ui32 lockNodeId,
+    TKqpScanComputeActor(const TActorId& executerId, ui64 txId, TMaybe<ui64> lockTxId, ui32 lockNodeId,
         NYql::NDqProto::TDqTask* task, NYql::NDq::IDqAsyncIoFactory::TPtr asyncIoFactory,
         const NYql::NDq::TComputeRuntimeSettings& settings, const NYql::NDq::TComputeMemoryLimits& memoryLimits, NWilson::TTraceId traceId,
         TIntrusivePtr<NActors::TProtoArenaHolder> arena);
