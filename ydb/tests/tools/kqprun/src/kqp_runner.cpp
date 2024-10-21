@@ -9,6 +9,7 @@
 
 #include <ydb/public/lib/json_value/ydb_json_value.h>
 #include <ydb/public/lib/ydb_cli/common/format.h>
+#include <ydb/public/lib/ydb_cli/common/plan2svg.h>
 
 
 namespace NKqpRun {
@@ -152,8 +153,12 @@ public:
 
         TYdbSetup::StopTraceOpt();
 
-        PrintScriptAst(meta.Ast);
+        if (!meta.Plan) {
+            meta.Plan = ExecutionMeta_.Plan;
+        }
 
+        PrintScriptAst(meta.Ast);
+        PrintScriptProgress(meta.Plan);
         PrintScriptPlan(meta.Plan);
 
         if (!status.IsSuccess()) {
@@ -245,7 +250,7 @@ private:
         }
 
         PrintScriptAst(ExecutionMeta_.Ast);
-
+        PrintScriptProgress(ExecutionMeta_.Plan);
         PrintScriptPlan(ExecutionMeta_.Plan);
 
         if (!status.IsSuccess() || ExecutionMeta_.ExecutionStatus != NYdb::NQuery::EExecStatus::Completed) {
@@ -334,6 +339,15 @@ private:
 
             outputStream << "\nPlan visualization:" << Endl;
             PrintPlan(convertedPlan, &outputStream);
+
+            outputStream.Finish();
+        }
+        if (Options_.ScriptQueryTimelineFile) {
+            TFileOutput outputStream(Options_.ScriptQueryTimelineFile);
+
+            TPlanVisualizer planVisualizer;
+            planVisualizer.LoadPlans(plan);
+            outputStream.Write(planVisualizer.PrintSvg());
 
             outputStream.Finish();
         }

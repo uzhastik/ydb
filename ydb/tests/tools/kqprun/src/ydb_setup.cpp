@@ -5,6 +5,7 @@
 #include <ydb/core/kqp/common/kqp_script_executions.h>
 #include <ydb/core/kqp/proxy_service/kqp_script_executions.h>
 
+#include <ydb/core/testlib/basics/storage.h>
 #include <ydb/core/testlib/test_client.h>
 
 #include <ydb/library/yql/providers/s3/actors/yql_s3_actors_factory_impl.h>
@@ -112,8 +113,20 @@ private:
         serverSettings.SetFrFactory(functionRegistryFactory);
     }
 
-    NKikimr::Tests::TServerSettings GetServerSettings() {
-        ui32 msgBusPort = PortManager_.GetPort();
+    void SetStorageSettings(NKikimr::Tests::TServerSettings& serverSettings) const {
+        const NKikimr::NFake::TStorage storage = {
+            .UseDisk = Settings_.UseRealPDisks,
+            .SectorSize = NKikimr::TTestStorageFactory::SECTOR_SIZE,
+            .ChunkSize = Settings_.UseRealPDisks ? NKikimr::TTestStorageFactory::CHUNK_SIZE : NKikimr::TTestStorageFactory::MEM_CHUNK_SIZE,
+            .DiskSize = Settings_.DiskSize
+        };
+
+        serverSettings.SetEnableMockOnSingleNode(!Settings_.DisableDiskMock && !Settings_.UseRealPDisks);
+        serverSettings.SetCustomDiskParams(storage);
+    }
+
+    NKikimr::Tests::TServerSettings GetServerSettings(ui32 grpcPort) {
+        const ui32 msgBusPort = PortManager_.GetPort();
 
         NKikimr::Tests::TServerSettings serverSettings(msgBusPort, Settings_.AppConfig.GetAuthConfig(), Settings_.AppConfig.GetPQConfig());
         serverSettings.SetNodeCount(Settings_.NodeCount);
@@ -137,6 +150,7 @@ private:
 
         SetLoggerSettings(serverSettings);
         SetFunctionRegistry(serverSettings);
+        SetStorageSettings(serverSettings);
 
         if (Settings_.MonitoringEnabled) {
             serverSettings.InitKikimrRunConfig();
@@ -215,7 +229,7 @@ public:
 
     NKikimr::NKqp::TEvKqp::TEvScriptResponse::TPtr ScriptRequest(const TString& script, NKikimrKqp::EQueryAction action, const TString& traceId) const {
         auto event = MakeHolder<NKikimr::NKqp::TEvKqp::TEvScriptRequest>();
-        FillScriptRequest(script, action, traceId, event->Record);
+        FillQueryRequest(script, NKikimrKqp::QUERY_TYPE_SQL_GENERIC_SCRIPT, event->Record);
 
         return RunKqpProxyRequest<NKikimr::NKqp::TEvKqp::TEvScriptRequest, NKikimr::NKqp::TEvKqp::TEvScriptResponse>(std::move(event));
     }
@@ -223,7 +237,7 @@ public:
     TQueryResponse QueryRequest(const TString& query, NKikimrKqp::EQueryAction action, const TString& traceId, TProgressCallback progressCallback) const {
         auto request = GetQueryRequest(query, action, traceId);
         auto promise = NThreading::NewPromise<TQueryResponse>();
-        GetRuntime()->Register(CreateRunScriptActorMock(std::move(request), promise, progressCallback));
+        GetRuntime()->Register(CreateRunScriptActorMock(std::move(request), promise, progressCallback), request.TargetNode - GetRuntime()->GetFirstNodeId(), GetRuntime()->GetAppData().UserPoolId);
 
         return promise.GetFuture().GetValueSync();
     }
@@ -324,17 +338,11 @@ private:
         request->SetType(type);
         request->SetAction(action);
         request->SetCollectStats(Ydb::Table::QueryStatsCollection::STATS_COLLECTION_FULL);
-        request->SetDatabase(Settings_.DomainName);
-        request->SetPoolId(Settings_.DefaultPoolId);
-    }
+        request->SetDatabase(GetDatabasePath(query.Database));
+        request->SetPoolId(query.PoolId);
 
-    void FillScriptRequest(const TString& script, NKikimrKqp::EQueryAction action, const TString& traceId, NKikimrKqp::TEvQueryRequest& event) const {
-        FillQueryRequest(script, NKikimrKqp::QUERY_TYPE_SQL_GENERIC_SCRIPT, action, traceId, event);
-
-        auto request = event.MutableRequest();
-        if (action == NKikimrKqp::QUERY_ACTION_EXECUTE) {
-            request->MutableTxControl()->mutable_begin_tx()->mutable_serializable_read_write();
-            request->MutableTxControl()->set_commit_tx(true);
+        if (Settings_.RequestsTimeout) {
+            request->SetTimeoutMs(Settings_.RequestsTimeout.MilliSeconds());
         }
     }
 
