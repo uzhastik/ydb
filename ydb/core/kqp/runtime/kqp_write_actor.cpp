@@ -18,6 +18,7 @@
 #include <ydb/core/tx/tx.h>
 #include <ydb/library/actors/core/actorsystem.h>
 #include <ydb/library/actors/core/interconnect.h>
+#include <ydb/library/wilson_ids/wilson.h>
 #include <ydb/library/yql/dq/actors/compute/dq_compute_actor_impl.h>
 #include <ydb/library/yql/public/issue/yql_issue_message.h>
 
@@ -149,10 +150,14 @@ public:
             Settings.GetImmediateTx())
         , InconsistentTx(
             Settings.GetInconsistentTx())
+        , MemoryLimit(MessageSettings.InFlightMemoryLimitPerActorBytes)
+        , WriteActorSpan(TWilsonKqp::WriteActor, NWilson::TTraceId(args.TraceId), "WriteActor")
     {
         YQL_ENSURE(std::holds_alternative<ui64>(TxId));
         YQL_ENSURE(!ImmediateTx);
         EgressStats.Level = args.StatsLevel;
+
+        Counters->WriteActorsCount->Inc();
     }
 
     void Bootstrap() {
@@ -259,6 +264,7 @@ private:
     }
 
     void ResolveTable() {
+        Counters->WriteActorsShardResolve->Inc();
         SchemeEntry.reset();
         SchemeRequest.reset();
 
@@ -282,8 +288,11 @@ private:
         entry.ShowPrivatePath = true;
         request->ResultSet.emplace_back(entry);
 
-        Send(MakeSchemeCacheID(), new TEvTxProxySchemeCache::TEvInvalidateTable(TableId, {}));
-        Send(MakeSchemeCacheID(), new TEvTxProxySchemeCache::TEvNavigateKeySet(request));
+        WriteActorStateSpan =  NWilson::TSpan(TWilsonKqp::WriteActorTableNavigate, WriteActorSpan.GetTraceId(),
+            "WaitForShardsResolve", NWilson::EFlags::AUTO_END);
+
+        Send(MakeSchemeCacheID(), new TEvTxProxySchemeCache::TEvInvalidateTable(TableId, {}), 0, 0, WriteActorSpan.GetTraceId());
+        Send(MakeSchemeCacheID(), new TEvTxProxySchemeCache::TEvNavigateKeySet(request), 0, 0, WriteActorSpan.GetTraceId());
     }
 
     void Handle(TEvTxProxySchemeCache::TEvNavigateKeySetResult::TPtr& ev) {
@@ -342,7 +351,7 @@ private:
         request->ResultSet.emplace_back(std::move(keyRange));
 
         TAutoPtr<TEvTxProxySchemeCache::TEvResolveKeySet> resolveReq(new TEvTxProxySchemeCache::TEvResolveKeySet(request));
-        Send(MakeSchemeCacheID(), resolveReq.Release(), 0, 0);
+        Send(MakeSchemeCacheID(), resolveReq.Release(), 0, 0, WriteActorSpan.GetTraceId());
     }
 
     void Handle(TEvTxProxySchemeCache::TEvResolveKeySetResult::TPtr& ev) {
@@ -382,6 +391,8 @@ private:
                 return builder;
             }()
             << ", Cookie=" << ev->Cookie);
+
+        
 
         switch (ev->Get()->GetStatus()) {
         case NKikimrDataEvents::TEvWriteResult::STATUS_UNSPECIFIED: {
@@ -549,6 +560,11 @@ private:
             EgressStats.Chunks++;
             EgressStats.Splits++;
             EgressStats.Resume();
+
+            if (auto it = SendTime.find(shardId); it != std::end(SendTime)) {
+                Counters->WriteActorWritesLatencyHistogram->Collect((TInstant::Now() - it->second).MilliSeconds());
+                SendTime.erase(it);
+            }
         }
         resumeNotificator.CheckMemory();
     }
@@ -586,7 +602,6 @@ private:
                 NYql::NDqProto::StatusIds::UNAVAILABLE);
             return;
         }
-
         auto evWrite = std::make_unique<NKikimr::NEvents::TDataEvents::TEvWrite>(
             NKikimrDataEvents::TEvWrite::MODE_IMMEDIATE);
         
@@ -618,6 +633,16 @@ private:
                 ShardedWriteController->GetWriteColumnIds(),
                 payloadIndex,
                 ShardedWriteController->GetDataFormat());
+        }
+
+        if (metadata->SendAttempts == 0) {
+            Counters->WriteActorImmediateWrites->Inc();
+            Counters->WriteActorWritesSizeHistogram->Collect(serializationResult.TotalDataSize);
+            Counters->WriteActorWritesOperationsHistogram->Collect(metadata->OperationsCount);
+
+            SendTime[shardId] = TInstant::Now();
+        } else {
+            Counters->WriteActorImmediateWritesRetries->Inc();
         }
 
         CA_LOG_D("Send EvWrite to ShardID=" << shardId << ", TxId=" << evWrite->Record.GetTxId()
@@ -713,6 +738,13 @@ private:
         NYql::TIssues issues;
         issues.AddIssue(std::move(issue));
 
+        if (WriteActorStateSpan) {
+            WriteActorStateSpan.EndError(issues.ToOneLineString());
+        }
+        if (WriteActorSpan) {
+            WriteActorSpan.EndError(issues.ToOneLineString());
+        }
+
         Callbacks->OnAsyncOutputError(OutputIndex, std::move(issues), statusCode);
     }
 
@@ -722,6 +754,8 @@ private:
     }
 
     void Prepare() {
+        WriteActorStateSpan.EndOk();
+
         YQL_ENSURE(SchemeEntry);
         ResolveAttempts = 0;
 
@@ -792,12 +826,16 @@ private:
     std::optional<NSchemeCache::TSchemeCacheRequest::TEntry> SchemeRequest;
     ui64 ResolveAttempts = 0;
 
+    THashMap<ui64, TInstant> SendTime;
     THashMap<ui64, TLockInfo> LocksInfo;
     bool Finished = false;
 
     const i64 MemoryLimit = kInFlightMemoryLimitPerActor;
 
     IShardedWriteControllerPtr ShardedWriteController = nullptr;
+
+    NWilson::TSpan WriteActorSpan;
+    NWilson::TSpan WriteActorStateSpan;
 };
 
 void RegisterKqpWriteActor(NYql::NDq::TDqAsyncIoFactory& factory, TIntrusivePtr<TKqpCounters> counters) {
