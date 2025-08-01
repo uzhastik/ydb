@@ -21,7 +21,7 @@
 #include <ydb/core/fq/libs/control_plane_storage/events/events.h>
 #include <ydb/core/fq/libs/control_plane_storage/schema.h>
 
-//#include <ydb/public/sdk/cpp/include/ydb-cpp-sdk/client/value/value.h>
+#include <ydb/public/sdk/cpp/client/ydb_value/value.h>
 
 #include <ydb/core/fq/libs/shared_resources/db_exec.h>
 
