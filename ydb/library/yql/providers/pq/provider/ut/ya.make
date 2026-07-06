@@ -16,7 +16,7 @@ PEERDIR(
     yql/essentials/minikql/comp_nodes/llvm16
     yql/essentials/providers/common/comp_nodes
     ydb/library/yql/providers/common/db_id_async_resolver
-    ydb/library/yql/providers/dq/local_gateway
+    yt/yql/providers/dq/local_gateway
     ydb/library/yql/providers/dq/provider
     ydb/library/yql/providers/pq/async_io
     ydb/library/yql/providers/pq/gateway/dummy

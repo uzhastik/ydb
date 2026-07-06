@@ -25,7 +25,7 @@
 
 #include <ydb/library/yql/providers/dq/provider/exec/yql_dq_exectransformer.h>
 
-#include <ydb/library/yql/providers/dq/local_gateway/yql_dq_gateway_local.h>
+#include <yt/yql/providers/dq/local_gateway/yql_dq_gateway_local.h>
 
 #include <yql/essentials/core/facade/yql_facade.h>
 #include <yql/essentials/utils/log/log.h>
